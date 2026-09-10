@@ -1,0 +1,11 @@
+transformers>=4.46
+tokenizers>=0.20
+torch>=2.5
+safetensors>=0.4
+peft>=0.13
+accelerate>=1.0
+bitsandbytes>=0.45
+huggingface-hub>=0.24
+gguf>=0.10
+sentencepiece>=0.2
+protobuf>=4.25

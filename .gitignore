@@ -19,6 +19,7 @@ htmlcov/
 # still pass before anything is tagged; CI skips the test steps when the
 # directory is absent rather than failing.
 tests/
+work/
 
 # Runtime state — never commit a validator's scores, EMA or round records
 state/
