@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
+<<<<<<< HEAD
 """Heal a width/layer-pruned student with full-parameter KD against the teacher."""
 from __future__ import annotations
 
 import argparse
 import json
+=======
+from __future__ import annotations
+
+import argparse
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 import random
 import time
 from pathlib import Path
@@ -19,12 +25,19 @@ from microtensor.training.distill_common import (
     augment_rows,
     collator,
     encode_rows,
+<<<<<<< HEAD
     evaluate_guard,
+=======
+    evaluate_model,
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     load_rows,
     make_probes,
     probe_words,
     read_holdout,
+<<<<<<< HEAD
     rows_fitting_max_len,
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     training_arguments,
 )
 
@@ -88,10 +101,17 @@ def cpu_latency_proxy(model: Any, tokenizer: Any) -> float:
     words = probe_words()
     text = ""
     ids: list[int] = []
+<<<<<<< HEAD
     while len(ids) < 284:
         text += " " + " ".join(rng.choice(words) for _ in range(400))
         ids = tokenizer(text, add_special_tokens=False)["input_ids"]
     input_ids = torch.tensor([ids[:284]], dtype=torch.long)
+=======
+    while len(ids) < 541:
+        text += " " + " ".join(rng.choice(words) for _ in range(700))
+        ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+    input_ids = torch.tensor([ids[:541]], dtype=torch.long)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     old_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     model = model.to("cpu").eval()
@@ -104,7 +124,11 @@ def cpu_latency_proxy(model: Any, tokenizer: Any) -> float:
 
 
 def main() -> int:
+<<<<<<< HEAD
     parser = argparse.ArgumentParser(description="Heal a pruned student with full-parameter KD")
+=======
+    parser = argparse.ArgumentParser(description="Heal a layer-pruned student with full-parameter KD")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     parser.add_argument("--student", required=True)
     parser.add_argument("--teacher", required=True)
     parser.add_argument("--data", type=Path, required=True)
@@ -113,6 +137,7 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--temperature", type=float, default=2.0)
+<<<<<<< HEAD
     parser.add_argument(
         "--augment",
         type=int,
@@ -121,6 +146,11 @@ def main() -> int:
     )
     parser.add_argument("--probe-rows", type=int, default=0)
     parser.add_argument("--max-len", type=int, default=1024)
+=======
+    parser.add_argument("--augment", type=int, default=8)
+    parser.add_argument("--probe-rows", type=int, default=300)
+    parser.add_argument("--max-len", type=int, default=1536)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=16)
     parser.add_argument("--out", type=Path, required=True)
@@ -133,6 +163,7 @@ def main() -> int:
     if args.out.exists() and any(args.out.iterdir()):
         raise SystemExit(f"output directory is not empty: {args.out}")
 
+<<<<<<< HEAD
     try:
         rows = load_rows(args.data)
         holdout_refs = read_holdout(args.holdout)
@@ -173,6 +204,39 @@ def main() -> int:
         dataset = encode_rows(tokenizer, train_rows, args.max_len)
     except (DistillError, OSError, ValueError) as exc:
         raise SystemExit(f"error: {exc}") from exc
+=======
+    rows = load_rows(args.data)
+    holdout_refs = read_holdout(args.holdout)
+    if len(holdout_refs) != 150:
+        raise SystemExit(f"holdout has {len(holdout_refs)} refs, expected 150")
+    holdout = [row for row in rows if row.ref in holdout_refs]
+    base_train = [row for row in rows if row.ref not in holdout_refs]
+
+    tokenizer = AutoTokenizer.from_pretrained(args.student, trust_remote_code=True)
+    teacher_tokenizer = AutoTokenizer.from_pretrained(args.teacher, trust_remote_code=True)
+    train_rows = augment_rows(
+        base_train,
+        args.augment,
+        tokenizer=tokenizer,
+        max_len=args.max_len,
+    ) + make_probes(args.probe_rows)
+    student = AutoModelForCausalLM.from_pretrained(
+        args.student, dtype=torch.bfloat16, trust_remote_code=True
+    )
+    teacher = AutoModelForCausalLM.from_pretrained(
+        args.teacher, dtype=torch.bfloat16, trust_remote_code=True
+    )
+    if student.config.vocab_size != teacher.config.vocab_size:
+        raise SystemExit(
+            f"vocabulary mismatch: student={student.config.vocab_size}, "
+            f"teacher={teacher.config.vocab_size}"
+        )
+    if tokenizer.get_vocab() != teacher_tokenizer.get_vocab():
+        raise SystemExit("student and teacher tokenizers differ")
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    dataset = encode_rows(tokenizer, train_rows, args.max_len)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
     for parameter in student.parameters():
         parameter.requires_grad_(True)
@@ -200,18 +264,23 @@ def main() -> int:
         train_dataset=dataset,
         data_collator=collator(tokenizer),
     )
+<<<<<<< HEAD
     print(
         f"KD rows: {len(train_rows)}; holdout: {len(holdout)}; "
         f"student layers={student.config.num_hidden_layers} "
         f"ffn={student.config.intermediate_size} "
         f"heads={student.config.num_attention_heads}/{student.config.num_key_value_heads}"
     )
+=======
+    print(f"KD rows: {len(train_rows)}; holdout rows: {len(holdout)}")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     trainer.train()
     student.config.use_cache = True
     trainer.save_model(args.out)
     tokenizer.save_pretrained(args.out)
 
     teacher.config.use_cache = True
+<<<<<<< HEAD
     device = "cuda" if torch.cuda.is_available() else "cpu"
     student.to(device)
     teacher.to(device)
@@ -255,6 +324,18 @@ def main() -> int:
         f"student CPU prefill, 284 tokens, 1 thread: "
         f"{cpu_latency_proxy(student, tokenizer):.2f} ms"
     )
+=======
+    teacher_f1, teacher_tokens = evaluate_model(teacher, tokenizer, holdout)
+    student_f1, student_tokens = evaluate_model(student, tokenizer, holdout)
+    print(f"teacher holdout F1: {teacher_f1:.6f}")
+    print(f"teacher mean output tokens: {teacher_tokens:.2f}")
+    print(f"healed student holdout F1: {student_f1:.6f}")
+    print(f"healed student mean output tokens: {student_tokens:.2f}")
+    del teacher
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print(f"student CPU prefill, 541 tokens, 1 thread: {cpu_latency_proxy(student, tokenizer):.2f} ms")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     return 0
 
 

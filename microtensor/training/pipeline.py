@@ -22,7 +22,11 @@ log = logging.getLogger("microtensor.training.pipeline")
 
 
 def work_dir(root: Path | None = None) -> Path:
+<<<<<<< HEAD
     return (root or Path("work") / "guard").resolve()
+=======
+    return (root or Path("work") / "support").resolve()
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 def run(

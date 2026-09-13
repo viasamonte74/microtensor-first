@@ -13,11 +13,17 @@ from microtensor.training.distill_common import (
     choose_holdout,
     collator,
     encode_rows,
+<<<<<<< HEAD
     evaluate_guard,
     evaluate_model,
     load_rows,
     make_probes,
     rows_fitting_max_len,
+=======
+    evaluate_model,
+    load_rows,
+    make_probes,
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     training_arguments,
     write_holdout,
 )
@@ -31,6 +37,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--epochs", type=float, default=2)
     parser.add_argument("--lr", type=float, default=2e-5)
+<<<<<<< HEAD
     parser.add_argument(
         "--augment",
         type=int,
@@ -39,6 +46,11 @@ def main() -> int:
     )
     parser.add_argument("--probe-rows", type=int, default=0)
     parser.add_argument("--max-len", type=int, default=1024)
+=======
+    parser.add_argument("--augment", type=int, default=8)
+    parser.add_argument("--probe-rows", type=int, default=300)
+    parser.add_argument("--max-len", type=int, default=1536)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=16)
     args = parser.parse_args()
@@ -48,15 +60,19 @@ def main() -> int:
 
     try:
         rows = load_rows(args.data)
+<<<<<<< HEAD
         tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
         # Keep max_len at the latency envelope; drop RAGTruth that does not fit.
         rows = rows_fitting_max_len(tokenizer, rows, args.max_len)
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         holdout = choose_holdout(rows)
         write_holdout(args.holdout_out, holdout)
         holdout_refs = {row.ref for row in holdout}
         base_train = [row for row in rows if row.ref not in holdout_refs]
+<<<<<<< HEAD
         train_rows = list(base_train)
         if args.augment:
             train_rows = augment_rows(
@@ -67,6 +83,17 @@ def main() -> int:
             )
         if args.probe_rows:
             train_rows = train_rows + make_probes(args.probe_rows)
+=======
+        tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        train_rows = augment_rows(
+            base_train,
+            args.augment,
+            tokenizer=tokenizer,
+            max_len=args.max_len,
+        ) + make_probes(args.probe_rows)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         dataset = encode_rows(tokenizer, train_rows, args.max_len)
     except (DistillError, OSError, ValueError) as exc:
         raise SystemExit(f"error: {exc}") from exc
@@ -96,13 +123,18 @@ def main() -> int:
     )
     print(
         f"rows: {len(rows)} total, {len(holdout)} holdout, "
+<<<<<<< HEAD
         f"{len(train_rows)} optimized (augment={args.augment})"
+=======
+        f"{len(train_rows)} optimized ({args.augment} augmentations/original)"
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     )
     trainer.train()
     model.config.use_cache = True
     trainer.save_model(args.out)
     tokenizer.save_pretrained(args.out)
 
+<<<<<<< HEAD
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     if holdout and '"unsupported"' in holdout[0].completion:
@@ -115,6 +147,11 @@ def main() -> int:
         mean_f1, mean_tokens = evaluate_model(model, tokenizer, holdout)
         print(f"teacher holdout F1: {mean_f1:.6f}")
         print(f"teacher mean output tokens: {mean_tokens:.2f}")
+=======
+    mean_f1, mean_tokens = evaluate_model(model, tokenizer, holdout)
+    print(f"teacher holdout F1: {mean_f1:.6f}")
+    print(f"teacher mean output tokens: {mean_tokens:.2f}")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     return 0
 
 

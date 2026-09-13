@@ -5,12 +5,16 @@ import ast
 import gc
 import json
 import os
+<<<<<<< HEAD
 import re
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+<<<<<<< HEAD
 # Fallback only when a tokenizer has no chat_template (should not happen for
 # Llama-3.2-Instruct). Prefer tokenizer.apply_chat_template in load_cases.
 _FALLBACK_TEMPLATE = (
@@ -22,6 +26,19 @@ _FALLBACK_TEMPLATE = (
 _STATEMENT_RE = re.compile(r"\nStatement:\n(.*?)\n\nReply with only JSON", re.S)
 
 DEFAULT_TARGET_SIZE = 48_000
+=======
+SYSTEM = (
+    "You are a helpful assistant that can use tools. "
+    "You are developed by Salesforce xLAM team."
+)
+TEMPLATE = (
+    "<|im_start|>system\n"
+    + SYSTEM
+    + "\n<|im_end|>"
+    + "<|im_start|>user\n{prompt}<|im_end|>"
+    + "<|im_start|>assistant\n{answer}<|im_end|>"
+)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 class PruneError(RuntimeError):
@@ -48,6 +65,7 @@ class Selection:
         return self.regular_ids + self.added_ids
 
 
+<<<<<<< HEAD
 @dataclass(frozen=True, slots=True)
 class RoundTripReport:
     n_statements: int
@@ -56,6 +74,8 @@ class RoundTripReport:
     failures: tuple[tuple[str, str, str], ...]  # ref, expected, got
 
 
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 def bytes_to_unicode() -> dict[int, str]:
     """GPT-2's reversible byte-to-unicode alphabet."""
     byte_values = (
@@ -91,6 +111,7 @@ def _answer(row: dict[str, Any]) -> str:
     raise PruneError(f"task {row.get('ref')!r} has no answer/completion/gold")
 
 
+<<<<<<< HEAD
 def extract_statement(prompt: str) -> str | None:
     match = _STATEMENT_RE.search(prompt)
     if not match:
@@ -121,6 +142,9 @@ def load_cases(
     the hard round-trip gate: every gold span / statement must encode→decode
     byte-identically on the pruned tokenizer.
     """
+=======
+def load_cases(corpus: Path) -> tuple[list[TextCase], list[dict[str, str]]]:
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     if not corpus.is_file():
         raise PruneError(f"corpus {corpus} is missing")
     rows: list[dict[str, Any]] = []
@@ -142,6 +166,7 @@ def load_cases(
 
     cases: list[TextCase] = []
     pairs: list[dict[str, str]] = []
+<<<<<<< HEAD
     statements: list[TextCase] = []
     seen_statements: set[str] = set()
     for index, row in enumerate(rows):
@@ -181,6 +206,21 @@ def load_cases(
     if not statements:
         raise PruneError(f"{corpus} yielded no Statement: blocks to round-trip")
     return cases, pairs, statements
+=======
+    for index, row in enumerate(rows):
+        prompt = str(row.get("prompt", "")).strip()
+        if not prompt:
+            continue
+        answer = _answer(row)
+        ref = str(row.get("ref", f"row-{index}"))
+        rendered = TEMPLATE.format(prompt=prompt, answer=answer)
+        cases.append(TextCase(f"{ref}:rendered", rendered))
+        cases.append(TextCase(f"{ref}:answer", answer))
+        pairs.append({"ref": ref, "prompt": prompt, "answer": answer})
+    if not pairs:
+        raise PruneError(f"{corpus} contains no prompt/answer pairs")
+    return cases, pairs
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 def _probe_source() -> str:
@@ -299,6 +339,7 @@ def select_tokens(
     cases: list[TextCase],
     target_size: int,
 ) -> Selection:
+<<<<<<< HEAD
     """Pick ~target_size tokens, merge-closed, preserving bytes + corpus closure.
 
     Llama BPE is not ordered so that `id < cutoff` is merge-closed (a low-id
@@ -310,6 +351,8 @@ def select_tokens(
       3. never keep a token whose merge parents are missing.
     Non-Latin / rare code tokens only survive if the corpus closure needs them.
     """
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     vocab = {str(token): int(token_id) for token, token_id in tokenizer_json["model"]["vocab"].items()}
     regular_ids = set(vocab.values())
     added = sorted(tokenizer_json.get("added_tokens", []), key=lambda item: int(item["id"]))
@@ -318,10 +361,15 @@ def select_tokens(
     used: set[int] = set()
     for case in cases:
         used.update(tokenizer(case.text, add_special_tokens=False)["input_ids"])
+<<<<<<< HEAD
     # Special / added tokens referenced by the chat template must stay.
     used |= set(added_ids)
     parents = merge_parents(tokenizer_json)
     closure = closure_of(used & regular_ids, parents)
+=======
+    parents = merge_parents(tokenizer_json)
+    closure = closure_of(used, parents)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
     inverse = {char: byte for byte, char in bytes_to_unicode().items()}
     decoded = {token_id: token_bytes(token, inverse) for token, token_id in vocab.items()}
@@ -334,6 +382,7 @@ def select_tokens(
     if len(byte_ids) != 256:
         raise PruneError(f"expected 256 single-byte tokens, found {len(byte_ids)}")
 
+<<<<<<< HEAD
     mandatory = closure_of((closure & regular_ids) | byte_ids, parents)
     budget = target_size - len(added_ids)
     if len(mandatory) > budget:
@@ -382,10 +431,37 @@ def select_tokens(
     for token_id in kept:
         for parent in parents.get(token_id, ()):
             if parent not in kept:
+=======
+    mandatory_regular = (closure & regular_ids) | byte_ids
+
+    def keep_at(cutoff: int) -> set[int]:
+        return mandatory_regular | {token_id for token_id in ascii_ids if token_id < cutoff}
+
+    lo, hi = 0, max(regular_ids) + 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        total = len(keep_at(mid)) + len(added_ids)
+        if total < target_size:
+            lo = mid + 1
+        else:
+            hi = mid
+    candidates = {max(0, lo - 1), lo, min(max(regular_ids) + 1, lo + 1)}
+    cutoff = min(
+        candidates,
+        key=lambda value: (abs(len(keep_at(value)) + len(added_ids) - target_size), value),
+    )
+    kept_regular = keep_at(cutoff)
+
+    missing: list[tuple[int, int]] = []
+    for token_id in kept_regular:
+        for parent in parents.get(token_id, ()):
+            if parent not in kept_regular:
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
                 missing.append((token_id, parent))
     if missing:
         child, parent = missing[0]
         raise PruneError(
+<<<<<<< HEAD
             f"KEEP is not merge-closed: token {child} requires parent {parent}"
         )
 
@@ -395,6 +471,14 @@ def select_tokens(
 
     return Selection(
         regular_ids=tuple(sorted(kept)),
+=======
+            f"KEEP is not merge-closed: token {child} requires parent {parent}; "
+            "the cutoff rule is invalid for this tokenizer"
+        )
+
+    return Selection(
+        regular_ids=tuple(sorted(kept_regular)),
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         added_ids=added_ids,
         cutoff=cutoff,
         closure=frozenset(closure),
@@ -504,6 +588,7 @@ def verify_tokenization(
     pruned: Any,
     cases: list[TextCase],
     mapping: dict[int, int],
+<<<<<<< HEAD
 ) -> tuple[int, int]:
     """Compare tokenisations; return (n_ok, n_changed).
 
@@ -517,11 +602,16 @@ def verify_tokenization(
     reverse = {new: old for old, new in mapping.items()}
     n_ok = 0
     n_changed = 0
+=======
+) -> None:
+    reverse = {new: old for old, new in mapping.items()}
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     for case in cases:
         old_ids = original(case.text, add_special_tokens=False)["input_ids"]
         new_ids = pruned(case.text, add_special_tokens=False)["input_ids"]
         old_tokens = original.convert_ids_to_tokens(old_ids)
         new_tokens = pruned.convert_ids_to_tokens(new_ids)
+<<<<<<< HEAD
         if old_tokens == new_tokens:
             mapped_back = [reverse.get(token_id, -1) for token_id in new_ids]
             if mapped_back != old_ids:
@@ -563,6 +653,13 @@ def verify_statement_roundtrip(tokenizer: Any, statements: list[TextCase]) -> Ro
         n_failed=n_failed,
         failures=tuple(failures[:20]),
     )
+=======
+        if old_tokens != new_tokens:
+            raise PruneError(f"token strings changed for {case.ref}")
+        mapped_back = [reverse.get(token_id, -1) for token_id in new_ids]
+        if mapped_back != old_ids:
+            raise PruneError(f"token ids do not map back for {case.ref}")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 def _generate(model: Any, tokenizer: Any, prompts: list[dict[str, str]], device: str) -> list[str]:
@@ -573,9 +670,18 @@ def _generate(model: Any, tokenizer: Any, prompts: list[dict[str, str]], device:
     outputs: list[str] = []
     with torch.inference_mode():
         for row in prompts[:20]:
+<<<<<<< HEAD
             messages = [{"role": "user", "content": row["prompt"]}]
             text = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
+=======
+            text = (
+                "<|im_start|>system\n"
+                + SYSTEM
+                + "\n<|im_end|><|im_start|>user\n"
+                + row["prompt"]
+                + "<|im_end|><|im_start|>assistant\n"
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
             )
             encoded = tokenizer(text, return_tensors="pt", add_special_tokens=False)
             encoded = {key: tensor.to(device) for key, tensor in encoded.items()}
@@ -640,10 +746,16 @@ def prune(
     *,
     revision: str | None = None,
     extra_text: Path | None = None,
+<<<<<<< HEAD
     target_size: int = DEFAULT_TARGET_SIZE,
     verify_generations: int = 0,
     require_roundtrip: bool = True,
 ) -> RoundTripReport:
+=======
+    target_size: int = 76_000,
+    verify_generations: int = 20,
+) -> None:
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     try:
         import torch
         from torch import nn
@@ -661,10 +773,15 @@ def prune(
         model_name, revision=revision, trust_remote_code=True, **auth
     )
     payload, _ = load_tokenizer_json(model_name, revision)
+<<<<<<< HEAD
     corpus_cases, prompts, statements = load_cases(corpus, tokenizer)
     cases = corpus_cases + extra_cases(extra_text)
     # Statements must be in the selection closure or the copy strategy dies.
     cases = cases + statements
+=======
+    corpus_cases, prompts = load_cases(corpus)
+    cases = corpus_cases + extra_cases(extra_text)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     selection = select_tokens(tokenizer, payload, cases, target_size)
     rebuilt, mapping = rebuild_tokenizer(payload, selection)
 
@@ -678,6 +795,7 @@ def prune(
     )
 
     pruned_tokenizer = AutoTokenizer.from_pretrained(out, trust_remote_code=True)
+<<<<<<< HEAD
     n_tok_ok, n_tok_changed = verify_tokenization(tokenizer, pruned_tokenizer, cases, mapping)
     print(f"tokenisation match  {n_tok_ok}/{n_tok_ok + n_tok_changed}  changed={n_tok_changed}")
 
@@ -699,6 +817,9 @@ def prune(
             f"pruned tokenizer fails statement round-trip on {report.n_failed}/"
             f"{report.n_statements} texts: {sample}"
         )
+=======
+    verify_tokenization(tokenizer, pruned_tokenizer, cases, mapping)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -745,12 +866,15 @@ def prune(
 
     reloaded_tokenizer = AutoTokenizer.from_pretrained(out, trust_remote_code=True)
     verify_tokenization(tokenizer, reloaded_tokenizer, cases, mapping)
+<<<<<<< HEAD
     report = verify_statement_roundtrip(reloaded_tokenizer, statements)
     if require_roundtrip and report.n_failed:
         raise PruneError(
             f"reloaded pruned tokenizer fails statement round-trip on "
             f"{report.n_failed}/{report.n_statements}"
         )
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     after_shape = tuple(model.get_input_embeddings().weight.shape)
     del model
     gc.collect()
@@ -775,6 +899,7 @@ def prune(
     print(f"embedding before    {before_shape}")
     print(f"embedding after     {after_shape}")
     print(f"output bytes        {directory_size(out)}")
+<<<<<<< HEAD
     print(
         f"statement roundtrip {report.n_ok}/{report.n_statements} ok  "
         f"failed={report.n_failed}"
@@ -803,15 +928,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Prune a Llama/Qwen BPE vocabulary without retokenizing task text"
     )
+=======
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Prune a Qwen2 BPE vocabulary without retokenizing task text")
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision")
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--extra-text", type=Path)
+<<<<<<< HEAD
     parser.add_argument("--target-size", type=int, default=DEFAULT_TARGET_SIZE)
+=======
+    parser.add_argument("--target-size", type=int, default=76_000)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--verify-generations",
         type=int,
+<<<<<<< HEAD
         default=0,
         help="number of prompts for greedy equivalence; 0 skips this expensive check",
     )
@@ -819,6 +955,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-roundtrip-failures",
         action="store_true",
         help="report statement encode→decode failures without aborting",
+=======
+        default=20,
+        help="number of prompts for greedy equivalence; 0 skips only this expensive check",
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     )
     return parser
 
@@ -834,7 +974,10 @@ def main(argv: list[str] | None = None) -> int:
             extra_text=args.extra_text,
             target_size=args.target_size,
             verify_generations=args.verify_generations,
+<<<<<<< HEAD
             require_roundtrip=not args.allow_roundtrip_failures,
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         )
     except (PruneError, OSError, ValueError) as exc:
         print(f"error: {exc}")

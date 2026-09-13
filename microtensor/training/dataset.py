@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+<<<<<<< HEAD
 import random
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -11,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from microtensor.core.constants import PUBLIC_SERVER_URL
+<<<<<<< HEAD
 from microtensor.training.arena import (
     CORPUS_VERSION,
     DEFAULT_POSITIVE_RATE,
@@ -20,6 +24,9 @@ from microtensor.training.arena import (
 )
 
 SEED = 1240
+=======
+from microtensor.training.arena import CORPUS_VERSION, PUBLIC_CORPUS_PATH, TRACK
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 class TrainError(RuntimeError):
@@ -31,29 +38,38 @@ class SftExample:
     ref: str
     prompt: str
     completion: str
+<<<<<<< HEAD
     origin: str = ""
     spans: tuple[str, ...] = ()
 
     @property
     def positive(self) -> bool:
         return bool(self.spans)
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetStats:
     n_train: int
+<<<<<<< HEAD
     n_positive: int
     n_negative: int
     positive_rate: float
     n_halueval: int
     n_ragtruth: int
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     prompt_chars_min: int
     prompt_chars_p50: int
     prompt_chars_p95: int
     prompt_chars_max: int
     recommended_tokens: int
+<<<<<<< HEAD
     legal_ok: int
     legal_failed: int
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
 
 def corpus_url(version: str = CORPUS_VERSION, api: str = PUBLIC_SERVER_URL) -> str:
@@ -73,6 +89,7 @@ def _get(url: str, timeout: int = 120) -> dict[str, Any]:
         raise TrainError(f"{url} could not be read: {exc}") from exc
 
 
+<<<<<<< HEAD
 def canonical_completion(spans: Sequence[str]) -> str:
     """The only legal assistant strings on this track.
 
@@ -170,6 +187,37 @@ def examples_from_public(tasks: Sequence[dict[str, Any]]) -> list[SftExample]:
                 completion=completion,
                 origin=origin,
                 spans=tuple(spans),
+=======
+def _completion(gold: Any) -> str:
+    """The assistant turn, byte-stable with the published gold.
+
+    Re-serialising a parsed object would change `100.0` into `100` and shuffle
+    keys. The scorer matches name, arguments and JSON types, so the gold string
+    is the target, not a pretty-printed cousin of it.
+    """
+    if isinstance(gold, str):
+        text = gold.strip()
+        if not text:
+            raise TrainError("gold string is empty")
+        json.loads(text)
+        return text
+    return json.dumps(gold, ensure_ascii=False)
+
+
+def examples_from(tasks: Sequence[dict[str, Any]]) -> list[SftExample]:
+    out: list[SftExample] = []
+    for row in tasks:
+        if str(row.get("partition", "train")) != "train":
+            continue
+        prompt = str(row.get("prompt", "")).strip()
+        if not prompt:
+            raise TrainError(f"task {row.get('ref')!r} has no prompt")
+        out.append(
+            SftExample(
+                ref=str(row["ref"]),
+                prompt=prompt,
+                completion=_completion(row.get("gold")),
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
             )
         )
     if not out:
@@ -177,6 +225,7 @@ def examples_from_public(tasks: Sequence[dict[str, Any]]) -> list[SftExample]:
     return out
 
 
+<<<<<<< HEAD
 _PROMPT_PREFIX = (
     "Below is a source passage and a statement generated from it.\n"
     "Return every part of the statement that the source does not support.\n"
@@ -318,11 +367,14 @@ def reweight_positives(
     return merged
 
 
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 def stats_of(examples: Sequence[SftExample]) -> DatasetStats:
     lengths = sorted(len(ex.prompt) for ex in examples)
     n = len(lengths)
     p50 = lengths[n // 2]
     p95 = lengths[min(n - 1, int(n * 0.95))]
+<<<<<<< HEAD
     # 4 chars/token plus chat-template and ~64-token completion headroom.
     recommended = int(((p95 / 4) + 160 + 63) // 64 * 64)
     recommended = max(512, min(2048, recommended))
@@ -342,11 +394,19 @@ def stats_of(examples: Sequence[SftExample]) -> DatasetStats:
         positive_rate=(n_pos / n) if n else 0.0,
         n_halueval=sum(1 for ex in examples if "halu" in ex.origin),
         n_ragtruth=sum(1 for ex in examples if ex.origin == "ragtruth"),
+=======
+    # 4 chars/token plus chat-template and 256-token completion headroom.
+    recommended = int(((p95 / 4) + 320 + 255) // 256 * 256)
+    recommended = max(512, min(2048, recommended))
+    return DatasetStats(
+        n_train=n,
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         prompt_chars_min=lengths[0],
         prompt_chars_p50=p50,
         prompt_chars_p95=p95,
         prompt_chars_max=lengths[-1],
         recommended_tokens=recommended,
+<<<<<<< HEAD
         legal_ok=legal_ok,
         legal_failed=legal_failed,
     )
@@ -387,12 +447,18 @@ def build_guard_sft(
     return reweighted, stats
 
 
+=======
+    )
+
+
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 def download_public(
     out_dir: Path,
     *,
     version: str = CORPUS_VERSION,
     api: str = PUBLIC_SERVER_URL,
     timeout: int = 120,
+<<<<<<< HEAD
     positive_rate: float = DEFAULT_POSITIVE_RATE,
     ragtruth_parquet: Path | None = None,
     ragtruth_limit: int | None = 2_000,
@@ -400,12 +466,17 @@ def download_public(
     seed: int = SEED,
 ) -> tuple[Path, DatasetStats]:
     """Fetch the public train split and write a guard SFT jsonl."""
+=======
+) -> tuple[Path, DatasetStats]:
+    """Fetch the public train split and write an SFT jsonl next to it."""
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     payload = _get(corpus_url(version, api), timeout=timeout)
     track = str(payload.get("track") or TRACK)
     if track != TRACK:
         raise TrainError(f"corpus {version} is track {track!r}, not {TRACK!r}")
 
     tasks = [t for t in payload.get("tasks", []) if isinstance(t, dict)]
+<<<<<<< HEAD
     ragtruth_rows: list[dict[str, Any]] | None = None
     if ragtruth_parquet is not None:
         ragtruth_rows = load_ragtruth_parquet(ragtruth_parquet)
@@ -418,6 +489,10 @@ def download_public(
         max_ragtruth_prompt_chars=max_ragtruth_prompt_chars,
         seed=seed,
     )
+=======
+    examples = examples_from(tasks)
+    stats = stats_of(examples)
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = out_dir / "public.json"
@@ -430,6 +505,7 @@ def download_public(
         "reference_model": payload.get("reference_model") or "",
         "counts": payload.get("counts") or {},
         "n_sft": stats.n_train,
+<<<<<<< HEAD
         "n_positive": stats.n_positive,
         "n_negative": stats.n_negative,
         "positive_rate": stats.positive_rate,
@@ -437,6 +513,8 @@ def download_public(
         "n_halueval": stats.n_halueval,
         "n_ragtruth": stats.n_ragtruth,
         "legal_ok": stats.legal_ok,
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         "prompt_chars": {
             "min": stats.prompt_chars_min,
             "p50": stats.prompt_chars_p50,
@@ -445,7 +523,10 @@ def download_public(
         },
         "recommended_max_input_tokens": stats.recommended_tokens,
         "sft": str(sft_path),
+<<<<<<< HEAD
         "ragtruth_parquet": str(ragtruth_parquet) if ragtruth_parquet else "",
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     }
     (out_dir / "meta.json").write_text(
         json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -457,13 +538,19 @@ def write_sft(path: Path, examples: Sequence[SftExample]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         for ex in examples:
+<<<<<<< HEAD
             assert_legal_completion(ex.completion)
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
             row = {
                 "ref": ex.ref,
                 "prompt": ex.prompt,
                 "completion": ex.completion,
+<<<<<<< HEAD
                 "origin": ex.origin,
                 "n_spans": len(ex.spans),
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
                 "messages": [
                     {"role": "user", "content": ex.prompt},
                     {"role": "assistant", "content": ex.completion},
@@ -485,15 +572,22 @@ def load_sft(path: Path) -> list[SftExample]:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise TrainError(f"{path}:{number} is not json: {exc}") from exc
+<<<<<<< HEAD
             completion = str(row["completion"])
             spans = tuple(assert_legal_completion(completion))
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
             examples.append(
                 SftExample(
                     ref=str(row.get("ref", f"row-{number}")),
                     prompt=str(row["prompt"]),
+<<<<<<< HEAD
                     completion=completion,
                     origin=str(row.get("origin", "")),
                     spans=spans,
+=======
+                    completion=str(row["completion"]),
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
                 )
             )
     if not examples:
@@ -515,8 +609,11 @@ def hf_token() -> str:
         os.environ.get("HF_TOKEN", "").strip()
         or os.environ.get("HUGGING_FACE_HUB_TOKEN", "").strip()
     )
+<<<<<<< HEAD
 
 
 # Legacy alias kept so older call sites that expected examples_from still work.
 def examples_from(tasks: Sequence[dict[str, Any]]) -> list[SftExample]:
     return examples_from_public(tasks)
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779

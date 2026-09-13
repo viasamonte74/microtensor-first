@@ -5,7 +5,10 @@ import json
 import random
 import re
 import subprocess
+<<<<<<< HEAD
 import time
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +18,10 @@ import torch
 
 SEED = 1240
 EMPTY_CALLS = '{"tool_calls": []}'
+<<<<<<< HEAD
 EMPTY_UNSUPPORTED = '{"unsupported": []}'
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 _FUNCTION_BLOCK = re.compile(r"(Functions:\n)(.*?)(\n\nRequest:)", re.DOTALL)
 _FUNCTION_LINE = re.compile(r"^- ([^(]+)\((.*?)\)(.*)$")
 _CALL_NOISE = re.compile(r"```(?:json)?|</?tool_call>|</?function_call>", re.IGNORECASE)
@@ -286,6 +292,7 @@ def encode_row(tokenizer: Any, row: Row, max_len: int) -> dict[str, list[int]]:
     }
 
 
+<<<<<<< HEAD
 def packed_token_count(tokenizer: Any, row: Row) -> int:
     full = tokenizer.apply_chat_template(
         row.messages, tokenize=False, add_generation_prompt=False
@@ -320,6 +327,8 @@ def rows_fitting_max_len(
     return kept
 
 
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
 def encode_rows(tokenizer: Any, rows: Sequence[Row], max_len: int) -> TokenDataset:
     return TokenDataset([encode_row(tokenizer, row, max_len) for row in rows])
 
@@ -364,10 +373,14 @@ def training_arguments(
         gradient_checkpointing=True,
         logging_steps=10,
         save_strategy="epoch",
+<<<<<<< HEAD
         save_total_limit=1,
         # Full-parameter 3B AdamW state is ~12 GiB; a second epoch checkpoint
         # OOM'd the disk (basic_ios / unexpected pos) after train had finished.
         save_only_model=True,
+=======
+        save_total_limit=2,
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
         report_to=[],
         remove_unused_columns=False,
         dataloader_num_workers=2,
@@ -513,7 +526,10 @@ def rubric_f1_tool_calls(output: Any, gold: Any) -> float:
 
 
 def evaluate_model(model: Any, tokenizer: Any, rows: Sequence[Row], limit: int = 0) -> tuple[float, float]:
+<<<<<<< HEAD
     """Legacy support-track F1. Prefer `evaluate_guard` for Arena 6."""
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
     device = next(model.parameters()).device
     model.eval()
     scores: list[float] = []
@@ -536,6 +552,7 @@ def evaluate_model(model: Any, tokenizer: Any, rows: Sequence[Row], limit: int =
             scores.append(rubric_f1_tool_calls(output, row.completion))
             counts.append(int(continuation.numel()))
     return sum(scores) / len(scores), sum(counts) / len(counts)
+<<<<<<< HEAD
 
 
 def evaluate_guard(
@@ -634,3 +651,5 @@ def evaluate_guard(
         "mean_ms": (sum(times_ms) / n) if times_ms else 0.0,
         "p95_ms": p95,
     }
+=======
+>>>>>>> 83dd90a202f33179871ef4cbfa00b3f66a936779
