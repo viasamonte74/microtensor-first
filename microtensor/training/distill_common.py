@@ -5,6 +5,7 @@ import json
 import random
 import re
 import subprocess
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ import torch
 
 SEED = 1240
 EMPTY_CALLS = '{"tool_calls": []}'
+EMPTY_UNSUPPORTED = '{"unsupported": []}'
 _FUNCTION_BLOCK = re.compile(r"(Functions:\n)(.*?)(\n\nRequest:)", re.DOTALL)
 _FUNCTION_LINE = re.compile(r"^- ([^(]+)\((.*?)\)(.*)$")
 _CALL_NOISE = re.compile(r"```(?:json)?|</?tool_call>|</?function_call>", re.IGNORECASE)
@@ -284,6 +286,40 @@ def encode_row(tokenizer: Any, row: Row, max_len: int) -> dict[str, list[int]]:
     }
 
 
+def packed_token_count(tokenizer: Any, row: Row) -> int:
+    full = tokenizer.apply_chat_template(
+        row.messages, tokenize=False, add_generation_prompt=False
+    )
+    return len(tokenizer(full, add_special_tokens=False)["input_ids"])
+
+
+def rows_fitting_max_len(
+    tokenizer: Any, rows: Sequence[Row], max_len: int
+) -> list[Row]:
+    """Drop examples that cannot train/eval inside the declared context.
+
+    Raising max_len to fit RAGTruth would train long prefills and inflate
+    validator p95. Keep max_len at the arena input budget and skip the tail.
+    """
+    kept: list[Row] = []
+    dropped = 0
+    longest = 0
+    for row in rows:
+        n = packed_token_count(tokenizer, row)
+        longest = max(longest, n)
+        if n <= max_len:
+            kept.append(row)
+        else:
+            dropped += 1
+    print(
+        f"max_len={max_len}: kept {len(kept)} / {len(rows)} "
+        f"(dropped {dropped} over-length, longest={longest})"
+    )
+    if not kept:
+        raise DistillError(f"no rows fit --max-len {max_len} (longest={longest})")
+    return kept
+
+
 def encode_rows(tokenizer: Any, rows: Sequence[Row], max_len: int) -> TokenDataset:
     return TokenDataset([encode_row(tokenizer, row, max_len) for row in rows])
 
@@ -328,7 +364,10 @@ def training_arguments(
         gradient_checkpointing=True,
         logging_steps=10,
         save_strategy="epoch",
-        save_total_limit=2,
+        save_total_limit=1,
+        # Full-parameter 3B AdamW state is ~12 GiB; a second epoch checkpoint
+        # OOM'd the disk (basic_ios / unexpected pos) after train had finished.
+        save_only_model=True,
         report_to=[],
         remove_unused_columns=False,
         dataloader_num_workers=2,
@@ -474,6 +513,7 @@ def rubric_f1_tool_calls(output: Any, gold: Any) -> float:
 
 
 def evaluate_model(model: Any, tokenizer: Any, rows: Sequence[Row], limit: int = 0) -> tuple[float, float]:
+    """Legacy support-track F1. Prefer `evaluate_guard` for Arena 6."""
     device = next(model.parameters()).device
     model.eval()
     scores: list[float] = []
@@ -496,3 +536,101 @@ def evaluate_model(model: Any, tokenizer: Any, rows: Sequence[Row], limit: int =
             scores.append(rubric_f1_tool_calls(output, row.completion))
             counts.append(int(continuation.numel()))
     return sum(scores) / len(scores), sum(counts) / len(counts)
+
+
+def evaluate_guard(
+    model: Any,
+    tokenizer: Any,
+    rows: Sequence[Row],
+    *,
+    limit: int = 0,
+    max_new_tokens: int = 40,
+) -> dict[str, float]:
+    """Holdout metrics for hallucination detection.
+
+    Returns exact-match (span_accuracy after JSON parse), decision accuracy,
+    copy fidelity on correctly flagged positives, specificity, sensitivity,
+    mean output tokens, and mean wall ms per example (device-dependent).
+    """
+    from microtensor.scoring.metrics import span_accuracy
+
+    device = next(model.parameters()).device
+    model.eval()
+    selected = list(rows[:limit] if limit else rows)
+    exact = 0
+    decisions = 0
+    copy_ok = 0
+    flagged_correct = 0
+    tp = fp = tn = fn = 0
+    tokens = 0
+    times_ms: list[float] = []
+
+    with torch.inference_mode():
+        for row in selected:
+            prompt = tokenizer.apply_chat_template(
+                row.messages[:-1], tokenize=False, add_generation_prompt=True
+            )
+            inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(device)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            start = time.perf_counter()
+            generated = model.generate(
+                **inputs,
+                do_sample=False,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+            )
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            times_ms.append((time.perf_counter() - start) * 1000.0)
+            continuation = generated[0, inputs["input_ids"].shape[1] :]
+            output = tokenizer.decode(continuation, skip_special_tokens=True).strip()
+            tokens += int(continuation.numel())
+
+            score = span_accuracy(output, row.completion)
+            if score >= 1.0 - 1e-9:
+                exact += 1
+
+            try:
+                pred = json.loads(output)
+                pred_spans = pred.get("unsupported", []) if isinstance(pred, dict) else None
+                if not isinstance(pred_spans, list):
+                    pred_spans = None
+            except (json.JSONDecodeError, TypeError):
+                pred_spans = None
+            try:
+                gold = json.loads(row.completion)
+                gold_spans = list(gold.get("unsupported", []))
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                gold_spans = []
+
+            gold_pos = bool(gold_spans)
+            pred_pos = bool(pred_spans) if pred_spans is not None else False
+            if pred_spans is not None and pred_pos == gold_pos:
+                decisions += 1
+            if gold_pos and pred_pos:
+                tp += 1
+                flagged_correct += 1
+                if pred_spans is not None and score >= 1.0 - 1e-9:
+                    copy_ok += 1
+            elif gold_pos and not pred_pos:
+                fn += 1
+            elif (not gold_pos) and pred_pos:
+                fp += 1
+            else:
+                tn += 1
+
+    n = max(len(selected), 1)
+    times_ms.sort()
+    p95 = times_ms[min(len(times_ms) - 1, int(0.95 * (len(times_ms) - 1)))] if times_ms else 0.0
+    return {
+        "n": float(len(selected)),
+        "exact_match": exact / n,
+        "decision_acc": decisions / n,
+        "copy_given_flag": (copy_ok / flagged_correct) if flagged_correct else 0.0,
+        "specificity": (tn / (tn + fp)) if (tn + fp) else 0.0,
+        "sensitivity": (tp / (tp + fn)) if (tp + fn) else 0.0,
+        "mean_output_tokens": tokens / n,
+        "mean_ms": (sum(times_ms) / n) if times_ms else 0.0,
+        "p95_ms": p95,
+    }

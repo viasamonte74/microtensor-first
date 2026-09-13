@@ -10,6 +10,7 @@ from microtensor.training.arena import (
     BASE_MODEL,
     CORPUS_VERSION,
     DEFAULT_MAX_SEQ_LEN,
+    DEFAULT_POSITIVE_RATE,
     DEFAULT_QUANT,
     HARDWARE_CLASS,
     LORA_ALPHA,
@@ -31,30 +32,53 @@ from microtensor.training.prune_vocab import PruneError, prune
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "train",
-        help="download the support corpus, LoRA-tune xLAM, export a GGUF",
+        help="download the guard corpus, prune/SFT Llama-3.2-3B, export a GGUF",
     )
     inner = parser.add_subparsers(dest="action", required=True)
 
-    dl = inner.add_parser("download", help="fetch the public train split and write sft.jsonl")
-    dl.add_argument("--out", type=Path, default=None, help="data directory (default work/support/data)")
+    dl = inner.add_parser(
+        "download",
+        help="fetch the public guard split, mix RAGTruth spans, write sft.jsonl",
+    )
+    dl.add_argument("--out", type=Path, default=None, help="data directory (default work/guard/data)")
     dl.add_argument("--corpus-version", default=CORPUS_VERSION)
     dl.add_argument("--api", default=PUBLIC_SERVER_URL)
+    dl.add_argument(
+        "--positive-rate",
+        type=float,
+        default=DEFAULT_POSITIVE_RATE,
+        help="subsample positives to this prior (scored partitions are ~0.35)",
+    )
+    dl.add_argument(
+        "--ragtruth-parquet",
+        type=Path,
+        default=None,
+        help="optional wandb/RAGTruth-processed parquet for sub-sentence positives",
+    )
+    dl.add_argument("--ragtruth-limit", type=int, default=2000)
+    dl.add_argument(
+        "--max-ragtruth-prompt-chars",
+        type=int,
+        default=2000,
+        help="drop RAGTruth rows longer than this (HaluEval max is ~1600)",
+    )
+    dl.add_argument("--seed", type=int, default=1240)
     dl.set_defaults(handler=_download)
 
     prune_cmd = inner.add_parser(
         "prune",
-        help="shrink the Qwen2 vocabulary while preserving task tokenization",
+        help="shrink the Llama vocabulary while preserving statement round-trips",
     )
     prune_cmd.add_argument("--model", default=BASE_MODEL.partition("@")[0])
     prune_cmd.add_argument("--revision", default=BASE_MODEL.partition("@")[2])
     prune_cmd.add_argument("--corpus", type=Path, default=None)
     prune_cmd.add_argument("--extra-text", type=Path)
-    prune_cmd.add_argument("--target-size", type=int, default=76_000)
+    prune_cmd.add_argument("--target-size", type=int, default=48_000)
     prune_cmd.add_argument("--out", type=Path, default=None)
     prune_cmd.add_argument("--verify-generations", type=int, default=20)
     prune_cmd.set_defaults(handler=_prune)
 
-    lora = inner.add_parser("lora", help="QLoRA SFT on the pinned xLAM-2-1b-fc-r")
+    lora = inner.add_parser("lora", help="QLoRA SFT on the pinned Llama-3.2-3B-Instruct")
     lora.add_argument("--data", type=Path, default=None, help="sft.jsonl or the data directory")
     lora.add_argument("--output", type=Path, default=None, help="adapter directory")
     lora.add_argument("--model", default=None, help="pruned local base or the pinned HF model")
@@ -73,10 +97,14 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     exp.add_argument("--adapter", type=Path, default=None)
     exp.add_argument("--out", type=Path, default=None, help="artifact directory (model.gguf)")
     exp.add_argument("--merged", type=Path, default=None)
-    exp.add_argument("--quant", default=DEFAULT_QUANT, help="Q4_K_M (cost), Q5_K_M, Q3_K_M")
+    exp.add_argument("--quant", default=DEFAULT_QUANT, help="default Q8_0 for guard; avoid Q4")
     exp.add_argument("--embedding-quant", default="Q8_0")
     exp.add_argument("--base-model", help="override the LoRA adapter's recorded base checkpoint")
-    exp.add_argument("--skip-merge", action="store_true")
+    exp.add_argument(
+        "--skip-merge",
+        action="store_true",
+        help="convert --merged HF checkpoint as-is (no LoRA merge)",
+    )
     exp.set_defaults(handler=_export)
 
     evaluate = inner.add_parser(
@@ -106,7 +134,14 @@ def _download(args: argparse.Namespace) -> int:
     out = args.out or (_root(args) / "data")
     try:
         sft, stats = download_public(
-            out, version=args.corpus_version, api=args.api
+            out,
+            version=args.corpus_version,
+            api=args.api,
+            positive_rate=args.positive_rate,
+            ragtruth_parquet=args.ragtruth_parquet,
+            ragtruth_limit=args.ragtruth_limit,
+            max_ragtruth_prompt_chars=args.max_ragtruth_prompt_chars,
+            seed=args.seed,
         )
     except TrainError as exc:
         return fail(str(exc))
@@ -114,11 +149,18 @@ def _download(args: argparse.Namespace) -> int:
     print(f"base           {BASE_MODEL}")
     print(f"examples       {stats.n_train}")
     print(
+        "class balance  "
+        f"pos {stats.n_positive}  neg {stats.n_negative}  "
+        f"rate {stats.positive_rate:.3f}  (target {args.positive_rate})"
+    )
+    print(f"origins        halueval {stats.n_halueval}  ragtruth {stats.n_ragtruth}")
+    print(f"legal gate     {stats.legal_ok}/{stats.n_train} canonical completions")
+    print(
         "prompt chars   "
         f"min {stats.prompt_chars_min}  p50 {stats.prompt_chars_p50}  "
         f"p95 {stats.prompt_chars_p95}  max {stats.prompt_chars_max}"
     )
-    print(f"declare tokens {stats.recommended_tokens}  (p95 prompt + template + 256 out)")
+    print(f"declare tokens {stats.recommended_tokens}  (p95 prompt + template + 64 out)")
     print(
         "envelope       "
         f"{MAX_SIZE_BYTES / 1024**3:.1f} GiB  "
@@ -198,7 +240,11 @@ def _export(args: argparse.Namespace) -> int:
     print(f"gguf     {gguf}")
     print(f"size     {size / 1024**3:.2f} GiB  (ceiling {MAX_SIZE_BYTES / 1024**3:.1f} GiB)")
     print(f"quant    {args.quant}")
-    print("next     mt miner init --artifact", artifact, "--track support --hardware-class mt-3g")
+    print(
+        "next     mt miner init --artifact",
+        artifact,
+        f"--track {TRACK} --hardware-class {HARDWARE_CLASS}",
+    )
     envelope = artifact / "envelope.json"
     if envelope.is_file():
         print(json.dumps(json.loads(envelope.read_text()), indent=2))

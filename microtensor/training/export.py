@@ -12,6 +12,7 @@ from microtensor.training.arena import (
     BASE_REVISION,
     DEFAULT_MAX_INPUT_TOKENS,
     DEFAULT_QUANT,
+    GGUF_VOCAB_PRE,
     MAX_SIZE_BYTES,
 )
 from microtensor.training.dataset import TrainError, hf_token
@@ -144,6 +145,7 @@ def convert_and_quantize(
     *,
     quant: str = DEFAULT_QUANT,
     embedding_quant: str = "Q8_0",
+    vocab_pre: str = GGUF_VOCAB_PRE,
     keep_fp16: bool = False,
 ) -> Path:
     convert, quantize = ensure_llama_cpp()
@@ -157,11 +159,13 @@ def convert_and_quantize(
     staging = artifact.parent / ".gguf-staging"
     staging.mkdir(parents=True, exist_ok=True)
     fp16 = staging / "model-f16.gguf"
-    wrapper = Path(__file__).resolve().parents[2] / "scripts" / "convert_hf_to_gguf_qwen2.py"
+    wrapper = Path(__file__).resolve().parents[2] / "scripts" / "convert_hf_to_gguf_pre.py"
     _run(
         [
             sys.executable,
             str(wrapper),
+            "--pre",
+            vocab_pre,
             str(convert),
             str(merged),
             "--outfile",
@@ -176,6 +180,8 @@ def convert_and_quantize(
     artifact.mkdir(parents=True, exist_ok=True)
     out = artifact / "model.gguf"
     quantize_cmd = [str(quantize)]
+    # When the body quant is already Q8_0, leave embeddings on the same type
+    # (explicit --token-embedding-type is still fine and documents intent).
     if embedding_quant:
         quantize_cmd.extend(["--token-embedding-type", embedding_quant])
     quantize_cmd.extend([str(fp16), str(out), quant])
@@ -183,17 +189,18 @@ def convert_and_quantize(
     if not keep_fp16:
         fp16.unlink(missing_ok=True)
     size = out.stat().st_size
-    log.info("quantised %s  %.2f GiB  (%s)", out, size / 1024**3, quant)
+    log.info("quantised %s  %.2f GiB  (%s, pre=%s)", out, size / 1024**3, quant, vocab_pre)
     if size > MAX_SIZE_BYTES:
         raise TrainError(
             f"{out} is {size} bytes, over the {MAX_SIZE_BYTES} byte class ceiling; "
-            "try Q4_K_S or Q3_K_M"
+            f"current quant={quant} — shrink layers/width before dropping below Q8_0"
         )
     (artifact / "envelope.json").write_text(
         (
             "{\n"
             f'  "quant": "{quant}",\n'
             f'  "embedding_quant": "{embedding_quant}",\n'
+            f'  "vocab_pre": "{vocab_pre}",\n'
             f'  "entrypoint": "model.gguf",\n'
             f'  "max_input_tokens": {DEFAULT_MAX_INPUT_TOKENS},\n'
             f'  "size_bytes": {size}\n'
@@ -211,10 +218,15 @@ def export_gguf(
     merged: Path | None = None,
     quant: str = DEFAULT_QUANT,
     embedding_quant: str = "Q8_0",
+    vocab_pre: str = GGUF_VOCAB_PRE,
     base_model: str | None = None,
     skip_merge: bool = False,
 ) -> Path:
-    """Merge LoRA, convert to GGUF, quantise into the artifact directory."""
+    """Merge LoRA, convert to GGUF, quantise into the artifact directory.
+
+    For a full HF checkpoint (no LoRA), pass skip_merge=True and set merged=
+    to that checkpoint directory.
+    """
     merged = merged or artifact.parent / "merged"
     if not skip_merge:
         merge_adapter(adapter, merged, base_model=base_model)
@@ -225,4 +237,5 @@ def export_gguf(
         artifact,
         quant=quant,
         embedding_quant=embedding_quant,
+        vocab_pre=vocab_pre,
     )
